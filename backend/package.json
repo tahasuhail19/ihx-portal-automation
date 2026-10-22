@@ -1,0 +1,16 @@
+{
+  "name": "ihxflow-backend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/server.js",
+    "start": "node src/server.js",
+    "check": "node src/selfCheck.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^4.21.2",
+    "playwright-core": "^1.56.1"
+  }
+}
