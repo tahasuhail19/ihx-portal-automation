@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { tokensMatch } from '../config.js';
 import { httpError, redact } from '../redact.js';
-import { assertPortalConfigured, isIhxProvider, isProviderSignedIn } from '../ihx/login.js';
+import { assertPortalConfigured } from '../ihx/login.js';
 
 const ACTIVE_STATES = new Set([
   'STARTING',
@@ -10,17 +10,9 @@ const ACTIVE_STATES = new Set([
   'READY_FOR_DOCTOR',
 ]);
 
-const FAILURE_CATEGORIES = new Set([
-  'verification',
-  'missingInfo',
-  'pageBroken',
-  'unexpected',
-  'other',
-]);
-
 const FORGET_AFTER_MS = 10 * 60 * 1000;
 
-export function createSessionManager({ config, browserless, runLogin, logger = console }) {
+export function createSessionManager({ config, desktop, runLogin, logger = console }) {
   const sessions = new Map();
 
   function activeCount() {
@@ -40,12 +32,6 @@ export function createSessionManager({ config, browserless, runLogin, logger = c
   }
 
   function create() {
-    if (!config.browserlessToken) {
-      throw httpError(
-        503,
-        'Browserless is not configured. Add BROWSERLESS_TOKEN to the .env file in the project root and restart the backend.',
-      );
-    }
     if (config.loginMode === 'portal') {
       assertPortalConfigured(config);
     }
@@ -61,19 +47,16 @@ export function createSessionManager({ config, browserless, runLogin, logger = c
       id: crypto.randomUUID(),
       token: crypto.randomBytes(32).toString('hex'),
       state: 'STARTING',
-      message: 'Starting the remote browser.',
+      message: 'Starting the browser desktop.',
       error: null,
       liveUrl: null,
-      liveURLId: null,
       createdAt: now,
       expiresAt: now + config.sessionTimeoutMs,
       terminal: false,
       closePromise: null,
-      userDoneHandled: false,
       browser: null,
-      context: null,
       page: null,
-      cdp: null,
+      closeDesktop: null,
       deadlineTimer: null,
     };
     sessions.set(session.id, session);
@@ -108,32 +91,33 @@ export function createSessionManager({ config, browserless, runLogin, logger = c
 
   async function run(session) {
     try {
-      const connection = await browserless.connect();
+      const connection = await desktop.connect();
       if (session.terminal) {
         await connection.browser.close().catch(() => {});
+        await connection.closeDesktop().catch(() => {});
         return;
       }
       session.browser = connection.browser;
-      session.context = connection.context;
       session.page = connection.page;
+      session.closeDesktop = connection.closeDesktop;
       session.browser.on?.('disconnected', () => {
         if (session.terminal) return;
         session.terminal = true;
         session.state = 'CLOSED';
         session.liveUrl = null;
-        session.message = 'The remote browser disconnected.';
+        session.message = 'The browser disconnected.';
         session.error = null;
         clearTimeout(session.deadlineTimer);
+        void session.closeDesktop?.().catch(() => {});
         scheduleForget(session);
         logger.info?.('browser disconnected', { sessionId: session.id, state: session.state });
       });
 
-      await publishLive(
-        session,
-        'LOGGING_IN',
-        'The remote browser is open. Signing in to IHX.',
-        signingInCard(),
-      );
+      session.liveUrl = desktop.viewerUrl;
+      session.state = 'LOGGING_IN';
+      session.message = 'The browser is open. Signing in to IHX.';
+      session.error = null;
+      logger.info?.('viewer ready', { sessionId: session.id, state: session.state });
 
       const result = await runLogin({
         page: session.page,
@@ -146,165 +130,35 @@ export function createSessionManager({ config, browserless, runLogin, logger = c
         },
       });
 
-      if (session.terminal) {
-        await session.browser?.close().catch(() => {});
-        return;
-      }
+      if (session.terminal) return;
 
       if (result.outcome === 'verification') {
-        await reveal(session, 'AWAITING_VERIFICATION', result.message, verificationCard());
+        setState(session, 'AWAITING_VERIFICATION', result.message);
         if (result.continueAfterOtp) {
           await result.continueAfterOtp(session.page, () => session.terminal);
         } else {
           await waitUntilVerified(session);
         }
         if (session.terminal || session.state !== 'AWAITING_VERIFICATION') return;
-        await markVerified(session);
-        return;
-      }
-
-      await reveal(session, 'READY_FOR_DOCTOR', result.message, readyCard(config));
-    } catch (error) {
-      if (session.terminal) return;
-      await closeSession(session, friendlyBrowserError(error, config), 'FAILED');
-    }
-  }
-
-  async function reveal(session, state, message, instructions) {
-    if (!session.liveUrl) {
-      await publishLive(session, state, message, instructions);
-      return;
-    }
-    if (session.terminal) return;
-    session.state = state;
-    session.message = message;
-    session.error = null;
-    if (instructions && session.cdp && session.liveURLId) {
-      try {
-        await browserless.replaceInstructions(session.cdp, session.liveURLId, instructions, 'Finish session');
-      } catch (error) {
-        logger.error?.('could not update live instructions', {
-          sessionId: session.id,
-          detail: redact(error?.message || ''),
-        });
-      }
-    }
-    logger.info?.('session state', { sessionId: session.id, state });
-  }
-
-  async function publishLive(session, state, message, instructions) {
-    const minted = await mint(session, instructions);
-    if (session.terminal) return;
-    session.liveUrl = minted.liveURL;
-    session.liveURLId = minted.liveURLId;
-    session.state = state;
-    session.message = message;
-    session.error = null;
-    logger.info?.('live url minted', { sessionId: session.id, state });
-  }
-
-  async function mint(session, instructions) {
-    const timeout = remainingMs(session);
-    if (!session.cdp) {
-      session.cdp = await browserless.openCdp(session.context, session.page);
-      attachLiveWatcher(session);
-    }
-    return browserless.mintLiveUrl(session.cdp, {
-      timeout,
-      interactable: true,
-      resizable: true,
-      showBrowserInterface: false,
-      quality: 20,
-      mode: 'follow',
-      instructions,
-      doneLabel: 'Finish session',
-    });
-  }
-
-  function attachLiveWatcher(session) {
-    session.cdp.on?.('Browserless.liveComplete', (event) => {
-      if (session.terminal) return;
-      if (event?.liveURLId && session.liveURLId && event.liveURLId !== session.liveURLId) return;
-      if (event?.reason === 'viewerDisconnected' || event?.reason === 'closed') return;
-      if (event?.reason === 'userDone') {
-        void handleUserDone(session);
-        return;
-      }
-      if (event?.reason === 'userFailed') {
-        const category = FAILURE_CATEGORIES.has(event?.feedback?.category)
-          ? event.feedback.category
-          : '';
-        void closeSession(
+        setState(
           session,
-          category ? `The viewer could not continue (${category}).` : 'The viewer could not continue.',
-          'FAILED',
+          'READY_FOR_DOCTOR',
+          'Verification completed. Automation has stopped. Finish the admission yourself in this browser.',
         );
         return;
       }
-      if (event?.reason === 'timeout') {
-        void closeSession(session, 'The interactive browser link expired.', 'CLOSED');
-      }
-    });
-  }
 
-  async function handleUserDone(session) {
-    if (session.terminal || session.userDoneHandled) return;
-    session.userDoneHandled = true;
-    if (session.state !== 'AWAITING_VERIFICATION') {
-      await closeSession(session, 'The doctor finished the session.', 'CLOSED');
-      return;
-    }
-
-    const verified = isIhxProvider(config)
-      ? await isProviderSignedIn(session.page).catch(() => false)
-      : await session.page
-        .waitForSelector(config.selectors.success, { timeout: 2000 })
-        .then(() => true)
-        .catch(() => false);
-    if (!verified) {
-      if (isIhxProvider(config)) {
-        session.userDoneHandled = false;
-        session.liveUrl = null;
-        session.liveURLId = null;
-        try {
-          await publishLive(
-            session,
-            'AWAITING_VERIFICATION',
-            'Enter the 5-digit OTP sent to the registered email. Sign-in has not finished yet.',
-            verificationCard(),
-          );
-        } catch (error) {
-          if (!session.terminal) await closeSession(session, friendlyBrowserError(error, config), 'FAILED');
-        }
-        return;
-      }
-      await closeSession(
-        session,
-        'Finish was chosen before the portal reached the configured success page.',
-        'FAILED',
-      );
-      return;
-    }
-
-    session.userDoneHandled = false;
-    session.liveUrl = null;
-    session.liveURLId = null;
-    try {
-      await publishLive(
-        session,
-        'READY_FOR_DOCTOR',
-        'Verification completed. Automation has stopped. Finish the admission yourself in this browser.',
-        readyCard(config),
-      );
+      setState(session, 'READY_FOR_DOCTOR', result.message);
     } catch (error) {
       if (!session.terminal) {
+        await desktop.closeDesktop?.().catch(() => {});
         await closeSession(session, friendlyBrowserError(error, config), 'FAILED');
       }
     }
   }
 
   async function waitUntilVerified(session) {
-    while (!session.terminal && !session.userDoneHandled && session.state === 'AWAITING_VERIFICATION') {
+    while (!session.terminal && session.state === 'AWAITING_VERIFICATION') {
       const left = session.expiresAt - Date.now();
       if (left < 2000) {
         throw new Error('Verification was not completed before the session expired.');
@@ -321,27 +175,6 @@ export function createSessionManager({ config, browserless, runLogin, logger = c
     }
   }
 
-  async function markVerified(session) {
-    try {
-      await browserless.replaceInstructions(
-        session.cdp,
-        session.liveURLId,
-        readyCard(config),
-        'Finish session',
-      );
-    } catch (error) {
-      logger.error?.('could not update live instructions', {
-        sessionId: session.id,
-        detail: redact(error?.message || ''),
-      });
-    }
-    if (session.terminal) return;
-    session.state = 'READY_FOR_DOCTOR';
-    session.message = 'Verification completed. Automation has stopped. Finish the admission yourself in this browser.';
-    session.error = null;
-    logger.info?.('session state', { sessionId: session.id, state: session.state });
-  }
-
   function closeSession(session, message, state) {
     if (session.closePromise) return session.closePromise;
     session.closePromise = (async () => {
@@ -352,14 +185,14 @@ export function createSessionManager({ config, browserless, runLogin, logger = c
       session.error = state === 'FAILED' ? message : null;
       clearTimeout(session.deadlineTimer);
       try {
-        await browserless.closeLiveUrl(session.cdp, session.liveURLId);
-      } catch {
-        // The live URL may already be closed.
-      }
-      try {
         await session.browser?.close();
       } catch {
-        // The browser may already be disconnected.
+        // The browser may already be closed.
+      }
+      try {
+        await session.closeDesktop?.();
+      } catch {
+        // The desktop processes may already be gone.
       }
       scheduleForget(session);
       logger.info?.('session ended', { sessionId: session.id, state });
@@ -394,74 +227,19 @@ export function createSessionManager({ config, browserless, runLogin, logger = c
   return { create, get, finish, closeAll, activeCount };
 }
 
-function remainingMs(session) {
-  const left = Math.floor(session.expiresAt - Date.now() - 1000);
-  if (left < 1000) {
-    throw new Error('Not enough session time remains to open the interactive browser.');
-  }
-  return left;
-}
-
-function readyCard(config) {
-  if (config.loginMode === 'portal') {
-    return {
-      layout: 'panel',
-      title: 'IHX is signed in',
-      summary: 'Login automation has stopped. Complete the admission yourself in this browser.',
-      steps: [
-        'Continue the admission in this browser.',
-        'Choose Finish session when you are done.',
-      ],
-      currentStep: 1,
-    };
-  }
-  return {
-    layout: 'panel',
-    title: 'Test browser',
-    summary: 'A public test page is open. The IHX portal is not connected, and nothing after this page is automated.',
-    steps: [
-      'Click and type on the page to confirm the stream.',
-      'Choose Finish session when you are done.',
-    ],
-    currentStep: 1,
-  };
-}
-
-function signingInCard() {
-  return {
-    layout: 'panel',
-    title: 'Signing in',
-    summary: 'Watch this browser. The cookie dialog closes, then the username and password are typed, then the OTP boxes appear.',
-    steps: [
-      'Watch the IHX page in this browser.',
-      'Type the 5-digit email OTP when the boxes appear.',
-    ],
-    currentStep: 1,
-  };
-}
-
-function verificationCard() {
-  return {
-    layout: 'panel',
-    title: 'Enter the email OTP',
-    summary: 'Type the 5-digit code sent to the registered email. Sign-in continues after the code is entered. This app does not read the email.',
-    steps: [
-      'Type the 5-digit OTP in the boxes.',
-      'Wait until IHX finishes signing in.',
-    ],
-    currentStep: 1,
-  };
+function setState(session, state, message) {
+  if (session.terminal) return;
+  session.state = state;
+  session.message = message;
+  session.error = null;
 }
 
 function friendlyBrowserError(error, config = {}) {
   let raw = redact(error?.message || 'The browser session failed.');
   if (config.password) raw = raw.split(config.password).join('[redacted]');
   if (config.username) raw = raw.split(config.username).join('[redacted]');
-  if (/maximum allowed|exceeds the maximum|maximum session/i.test(raw)) {
-    return `${raw} Lower SESSION_TIMEOUT_MS to the plan maximum, or upgrade the Browserless plan.`;
-  }
-  if (/401|403|invalid api key|no valid credentials/i.test(raw)) {
-    return 'Browserless rejected the API token. Check BROWSERLESS_TOKEN in the project root .env file.';
+  if (/xvfb|x11vnc|websockify|novnc|virtual display|docker compose/i.test(raw)) {
+    return 'The browser desktop failed to start. Start the app with Docker Compose and try again.';
   }
   return raw;
 }

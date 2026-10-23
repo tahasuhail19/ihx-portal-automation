@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import cors from 'cors';
 import express from 'express';
 import { tokensMatch } from './config.js';
@@ -31,10 +33,8 @@ export function createApp(config, manager, logger) {
   app.get('/api/health', (req, res) => {
     res.json({
       ok: true,
-      browserlessConfigured: Boolean(config.browserlessToken),
-      browserlessHost: config.browserlessHost,
-      browserlessOrigin: config.browserlessOrigin,
-      knownCloudRegion: config.knownCloudRegion,
+      browserReady: true,
+      viewer: 'novnc',
       loginMode: config.loginMode,
       sessionTimeoutMs: config.sessionTimeoutMs,
       maxActiveSessions: config.maxActiveSessions,
@@ -69,6 +69,17 @@ export function createApp(config, manager, logger) {
   app.use('/api', (req, res) => {
     res.status(404).json({ error: 'Not found.' });
   });
+
+  if (config.staticDir && fs.existsSync(config.staticDir)) {
+    app.use(express.static(config.staticDir, { index: false }));
+    app.use((req, res, next) => {
+      if (req.method !== 'GET' || req.path.startsWith('/api')) {
+        next();
+        return;
+      }
+      res.sendFile(path.join(config.staticDir, 'index.html'));
+    });
+  }
 
   app.use((error, req, res, next) => {
     if (res.headersSent) {

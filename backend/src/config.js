@@ -2,15 +2,10 @@ import crypto from 'node:crypto';
 import dotenv from 'dotenv';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { buildViewerUrl } from './browser/desktop.js';
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 dotenv.config({ path: path.join(rootDir, '.env'), quiet: true });
-
-const REGIONS = new Set([
-  'production-sfo.browserless.io',
-  'production-lon.browserless.io',
-  'production-ams.browserless.io',
-]);
 
 function requiredText(name, fallback = '') {
   const value = process.env[name];
@@ -24,14 +19,6 @@ function integerEnv(name, fallback, { min, max }) {
     throw new Error(`${name} must be an integer from ${min} to ${max}.`);
   }
   return value;
-}
-
-function booleanEnv(name, fallback) {
-  const raw = requiredText(name);
-  if (raw === '') return fallback;
-  if (raw === 'true') return true;
-  if (raw === 'false') return false;
-  throw new Error(`${name} must be true or false.`);
 }
 
 function httpUrl(name, fallback = '') {
@@ -49,27 +36,12 @@ function httpUrl(name, fallback = '') {
   return parsed.toString();
 }
 
-function proxyEnv() {
-  const value = requiredText('BROWSERLESS_PROXY').toLowerCase();
-  if (value === '' || value === 'residential' || value === 'datacenter') return value;
-  throw new Error('BROWSERLESS_PROXY must be residential, datacenter, or empty.');
-}
-
-function countryEnv() {
-  const value = requiredText('BROWSERLESS_PROXY_COUNTRY').toLowerCase();
-  if (value === '') return '';
-  if (!/^[a-z]{2}$/.test(value)) {
-    throw new Error('BROWSERLESS_PROXY_COUNTRY must be a two-letter country code.');
+function displayEnv() {
+  const value = requiredText('DISPLAY', ':99');
+  if (!/^:\d+$/.test(value)) {
+    throw new Error('DISPLAY must look like :99.');
   }
   return value;
-}
-
-function browserlessHost() {
-  const host = requiredText('BROWSERLESS_HOST', 'production-sfo.browserless.io').toLowerCase();
-  if (!/^[a-z0-9.-]+$/.test(host) || host.includes('..')) {
-    throw new Error('BROWSERLESS_HOST must be a hostname, without a protocol or path.');
-  }
-  return host;
 }
 
 export function loadConfig() {
@@ -78,24 +50,23 @@ export function loadConfig() {
     throw new Error('IHX_LOGIN_MODE must be "test" or "portal".');
   }
 
-  const host = browserlessHost();
   const bindHost = requiredText('HOST', '127.0.0.1');
   const appApiKey = requiredText('APP_API_KEY');
-  const localhost = bindHost === '127.0.0.1' || bindHost === 'localhost';
-  if (!localhost && appApiKey === '') {
-    throw new Error('APP_API_KEY is required when HOST is not localhost.');
+  const localBind = bindHost === '127.0.0.1' || bindHost === 'localhost' || bindHost === '0.0.0.0' || bindHost === '::';
+  if (!localBind && appApiKey === '') {
+    throw new Error('APP_API_KEY is required when HOST is not a local address.');
   }
 
   return {
     rootDir,
-    browserlessToken: requiredText('BROWSERLESS_TOKEN'),
-    browserlessHost: host,
-    browserlessOrigin: `https://${host}`,
-    knownCloudRegion: REGIONS.has(host),
-    stealth: booleanEnv('BROWSERLESS_STEALTH', false),
-    proxy: proxyEnv(),
-    proxyCountry: countryEnv(),
-    sessionTimeoutMs: integerEnv('SESSION_TIMEOUT_MS', 120_000, {
+    display: displayEnv(),
+    screenWidth: integerEnv('SCREEN_WIDTH', 1280, { min: 800, max: 1920 }),
+    screenHeight: integerEnv('SCREEN_HEIGHT', 800, { min: 600, max: 1200 }),
+    vncPort: integerEnv('VNC_PORT', 5900, { min: 1, max: 65535 }),
+    novncPort: integerEnv('NOVNC_PORT', 6080, { min: 1, max: 65535 }),
+    novncWeb: requiredText('NOVNC_WEB', '/opt/noVNC'),
+    viewerUrl: buildViewerUrl(requiredText('VIEWER_URL')),
+    sessionTimeoutMs: integerEnv('SESSION_TIMEOUT_MS', 1_800_000, {
       min: 10_000,
       max: 14_400_000,
     }),
@@ -112,13 +83,14 @@ export function loadConfig() {
       verification: requiredText('IHX_VERIFICATION_SELECTOR'),
     },
     appApiKey,
-    corsOrigins: requiredText('CORS_ORIGINS', 'http://localhost:5173,http://127.0.0.1:5173')
+    corsOrigins: requiredText('CORS_ORIGINS', 'http://localhost:5173,http://127.0.0.1:5173,http://127.0.0.1:3001')
       .split(',')
       .map((origin) => origin.trim())
       .filter(Boolean),
     bindHost,
     port: integerEnv('PORT', 3001, { min: 1, max: 65535 }),
     maxActiveSessions: integerEnv('MAX_ACTIVE_SESSIONS', 1, { min: 1, max: 5 }),
+    staticDir: requiredText('STATIC_DIR'),
   };
 }
 

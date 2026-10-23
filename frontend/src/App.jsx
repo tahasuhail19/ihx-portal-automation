@@ -108,7 +108,7 @@ export default function App() {
 
   const active = session && session.state !== 'FAILED' && session.state !== 'CLOSED';
   const showBrowser = Boolean(session?.liveUrl);
-  const configured = health?.browserlessConfigured === true;
+  const configured = health?.browserReady === true;
 
   return (
     <main className={showBrowser ? 'shell shell-live' : 'shell'}>
@@ -117,7 +117,7 @@ export default function App() {
           <p className="eyebrow">Testing</p>
           <h1>IHX browser session</h1>
         </div>
-        <p className="topbar-note">Remote browser. Nothing is installed on this computer.</p>
+        <p className="topbar-note">The browser runs in Docker and is shown here.</p>
       </header>}
 
       {showBrowser ? null : <section className="panel">
@@ -125,7 +125,7 @@ export default function App() {
         {healthError ? <p className="banner bad" role="alert">{healthError}</p> : null}
         {health && !configured ? (
           <p className="banner warn" role="status">
-            Add your Browserless API token to <code>.env</code> as <code>BROWSERLESS_TOKEN</code>, then restart the backend.
+            The backend is missing the browser desktop. Start the app with Docker Compose.
           </p>
         ) : null}
         {health?.loginMode === 'test' ? (
@@ -135,7 +135,7 @@ export default function App() {
         ) : null}
         {health?.loginMode === 'portal' ? (
           <p className="banner info" role="status">
-            Open IHX opens a remote browser, signs in to the provider portal, then waits for the email OTP. Type the 5-digit code in the browser. After sign-in, finish the admission yourself. This session lasts {Math.round(health.sessionTimeoutMs / 60000)} minutes.
+            Open IHX starts the Docker browser, signs in to the provider portal, then waits for the email OTP. Type the 5-digit code in the browser. The same browser stays open so you can finish the admission. This session lasts {Math.round(health.sessionTimeoutMs / 60000)} minutes.
           </p>
         ) : null}
 

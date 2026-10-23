@@ -1,7 +1,7 @@
 import { createApp } from './app.js';
 import { loadConfig } from './config.js';
 import { createLogger } from './logger.js';
-import { createBrowserlessClient } from './browser/browserless.js';
+import { createDesktopBrowser } from './browser/desktop.js';
 import { runIhxLogin } from './ihx/login.js';
 import { createSessionManager } from './sessions/sessionManager.js';
 
@@ -9,7 +9,7 @@ const config = loadConfig();
 const logger = createLogger();
 const manager = createSessionManager({
   config,
-  browserless: createBrowserlessClient(config),
+  desktop: createDesktopBrowser(config, logger),
   runLogin: runIhxLogin,
   logger,
 });
@@ -20,16 +20,11 @@ const server = app.listen(config.port, config.bindHost, () => {
     host: config.bindHost,
     port: config.port,
     loginMode: config.loginMode,
-    browserlessConfigured: Boolean(config.browserlessToken),
-    browserlessHost: config.browserlessHost,
-    browserlessStealth: config.stealth,
-    browserlessProxy: config.proxy || 'none',
+    viewer: 'novnc',
+    display: config.display,
     sessionTimeoutMs: config.sessionTimeoutMs,
     apiKeyRequired: Boolean(config.appApiKey),
   });
-  if (!config.browserlessToken) {
-    logger.info('BROWSERLESS_TOKEN is empty. Add it to the project root .env file and restart.');
-  }
 });
 
 async function shutdown() {
