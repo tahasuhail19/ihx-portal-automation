@@ -45,7 +45,7 @@ export function portalProfile(portalUrl) {
 
 export async function runCasePortalLogin({ page, config, onState }) {
   const profile = portalProfile(config.portalUrl);
-  const openUrl = profile.loginUrl || config.portalUrl;
+  const openUrl = config.portalUrl;
   await onState('LOGGING_IN', `Opening ${openUrl}`);
   if (profile.id === 'icici') {
     await page.route('**/*disable-devtool*', (route) => route.fulfill({

@@ -31,7 +31,7 @@ export function createSessionManager({ config, desktop, runLogin, loadCase = nul
     return session;
   }
 
-  function create() {
+  function create({ pmjayRegistrationId = '' } = {}) {
     if (config.loginMode === 'portal' && !config.rpaEnabled) {
       assertPortalConfigured(config);
     }
@@ -58,6 +58,7 @@ export function createSessionManager({ config, desktop, runLogin, loadCase = nul
       page: null,
       closeDesktop: null,
       deadlineTimer: null,
+      pmjayRegistrationId: String(pmjayRegistrationId || '').trim(),
     };
     sessions.set(session.id, session);
 
@@ -90,20 +91,28 @@ export function createSessionManager({ config, desktop, runLogin, loadCase = nul
     let loginConfig = config;
     try {
       if (config.loginMode === 'portal' && config.rpaEnabled) {
-        session.message = 'Checking for an IHX case.';
-        const identity = await loadCase?.();
+        session.message = session.pmjayRegistrationId
+          ? `Opening the portal for ${session.pmjayRegistrationId}.`
+          : 'Checking for an IHX case.';
+        const identity = await loadCase?.(session.pmjayRegistrationId);
         if (session.terminal) return;
-        if (!identity?.username || !identity?.password) {
-          await closeSession(session, 'No IHX case is waiting.', 'FAILED');
+        if (!identity?.username || !identity?.password || !identity?.portalUrl) {
+          await closeSession(
+            session,
+            session.pmjayRegistrationId ? 'This case has no portal login.' : 'No IHX case is waiting.',
+            'FAILED',
+          );
           return;
         }
         loginConfig = {
           ...config,
-          portalUrl: identity.portalUrl || config.portalUrl || 'https://provider.ihx.in/',
+          portalUrl: identity.portalUrl,
           username: identity.username,
           password: identity.password,
           readEmailOtp,
         };
+        session.username = identity.username;
+        session.password = identity.password;
       } else {
         loginConfig = { ...config, readEmailOtp };
       }
@@ -230,6 +239,8 @@ export function createSessionManager({ config, desktop, runLogin, loadCase = nul
       error: session.error,
       loginMode: config.loginMode,
       portalUrl: session.portalUrl || null,
+      username: session.username || null,
+      password: session.password || null,
       liveUrl: interactive ? session.liveUrl : null,
       expiresAt: session.expiresAt ? new Date(session.expiresAt).toISOString() : null,
       createdAt: new Date(session.createdAt).toISOString(),

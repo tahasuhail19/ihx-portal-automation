@@ -31,7 +31,7 @@ export function selectHospitalCredential(credentials, payer) {
 export function identityOf(credential) {
   return {
     tpaName: credential?.tpaName || credential?.tpa || credential?.tpamaster?.tpa || '',
-    portalUrl: credential?.tpamaster?.urlOrReceiverMail || credential?.portalUrl || '',
+    portalUrl: credential?.tpamaster?.urlOrReceiverMail || '',
     username: credential?.userName || credential?.username || '',
     password: credential?.password || '',
   };
@@ -92,23 +92,33 @@ export function latestRequest(requests) {
   return usable[0] || null;
 }
 
-export async function loadIhxCredentials(client, logger = console) {
-  const body = await client.fetchRequests();
-  const requests = Array.isArray(body?.requests) ? body.requests : [];
-  const request = latestRequest(requests);
-  if (!request) {
-    logger.info?.('rpa-requests returned no cases.');
-    return null;
+export async function loadIhxCredentials(client, logger = console, pmjayRegistrationId = '') {
+  const requestedId = String(pmjayRegistrationId || '').trim();
+  let caseId = requestedId;
+  let documentType = 'ADMISSIONDOCUMENT';
+
+  if (!caseId) {
+    const body = await client.fetchRequests();
+    const requests = Array.isArray(body?.requests) ? body.requests : [];
+    const request = latestRequest(requests);
+    if (!request) {
+      logger.info?.('rpa-requests returned no cases.');
+      return null;
+    }
+    caseId = String(request.pmjayRegistrationId).trim();
+    documentType = String(request.documentType ?? '').trim() || 'ADMISSIONDOCUMENT';
+    logger.info?.('Using the latest case.', { caseId });
+  } else {
+    logger.info?.('Using the selected case.', { caseId });
   }
 
-  const caseId = String(request.pmjayRegistrationId).trim();
-  const documentType = String(request.documentType ?? '').trim() || 'ADMISSIONDOCUMENT';
-  logger.info?.('Using the latest case.', { caseId });
   const payload = await client.fetchCaseData(caseId, documentType);
   const credential = portalCredentialFromCase(payload);
   if (!credential) {
-    throw new Error('The latest case has no portal login.');
+    throw new Error(requestedId
+      ? 'This case has no portal login.'
+      : 'The latest case has no portal login.');
   }
-  logger.info?.(`Latest case portal is ${credential.tpaName || 'IHX'}.`);
+  logger.info?.(`Case portal is ${credential.tpaName || 'IHX'}.`);
   return credential;
 }

@@ -5,7 +5,7 @@ import { buildViewerUrl } from './browser/desktop.js';
 import { assertPortalConfigured, runIhxLogin } from './ihx/login.js';
 import { redact } from './redact.js';
 import { createSessionManager } from './sessions/sessionManager.js';
-import { ihxCredentialFromCase, latestRequest, portalCredentialFromCase } from './integrations/ihxCase.js';
+import { ihxCredentialFromCase, latestRequest, loadIhxCredentials, portalCredentialFromCase } from './integrations/ihxCase.js';
 import { portalProfile } from './ihx/casePortal.js';
 import { createRpaClient } from './integrations/rpaClient.js';
 
@@ -190,6 +190,18 @@ const mixedCase = {
 };
 assert.equal(ihxCredentialFromCase(mixedCase).username, 'star-user');
 assert.equal(ihxCredentialFromCase(mixedCase).portalUrl, 'https://provider.ihx.in/login');
+const selectedCalls = [];
+const selectedCredential = await loadIhxCredentials({
+  async fetchRequests() {
+    throw new Error('selected case must not list every request');
+  },
+  async fetchCaseData(id, documentType) {
+    selectedCalls.push([id, documentType]);
+    return otherCase;
+  },
+}, { info() {} }, '20405240009');
+assert.deepEqual(selectedCalls, [['20405240009', 'ADMISSIONDOCUMENT']]);
+assert.equal(selectedCredential.portalUrl, 'https://provider.volohealthtpa.com/home');
 assert.equal(latestRequest([
   { pmjayRegistrationId: 'old', isTpa: true, createdAt: '2026-10-22T10:00:00.000Z' },
   { pmjayRegistrationId: 'new', isTpa: true, createdAt: '2026-10-26T07:58:50.000Z' },

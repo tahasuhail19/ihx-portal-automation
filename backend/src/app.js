@@ -46,7 +46,9 @@ export function createApp(config, manager, logger) {
 
   app.post('/api/ihx/session', requireApiKey(config), rateLimit(), (req, res, next) => {
     try {
-      res.status(201).json(manager.create());
+      res.status(201).json(manager.create({
+        pmjayRegistrationId: registrationId(req.body?.pmjayRegistrationId),
+      }));
     } catch (error) {
       next(error);
     }
@@ -101,6 +103,15 @@ export function createApp(config, manager, logger) {
   });
 
   return app;
+}
+
+function registrationId(value) {
+  const id = String(value ?? '').trim();
+  if (!id) return '';
+  if (!/^[A-Za-z0-9-]{4,64}$/.test(id)) {
+    throw httpError(400, 'Registration id is not valid.');
+  }
+  return id;
 }
 
 function validId(id) {

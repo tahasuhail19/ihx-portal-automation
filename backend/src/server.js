@@ -16,7 +16,9 @@ const manager = createSessionManager({
   config,
   desktop: createDesktopBrowser(config, logger),
   runLogin: runIhxLogin,
-  loadCase: rpaClient ? () => loadIhxCredentials(rpaClient, logger) : null,
+  loadCase: rpaClient
+    ? (pmjayRegistrationId) => loadIhxCredentials(rpaClient, logger, pmjayRegistrationId)
+    : null,
   readEmailOtp: emailClient
     ? (options = {}) => fetchEmailOtp(options.from || config.emailOtpFrom, { ...options, client: emailClient, logger })
     : null,
