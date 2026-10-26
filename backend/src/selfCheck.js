@@ -5,7 +5,8 @@ import { buildViewerUrl } from './browser/desktop.js';
 import { assertPortalConfigured, runIhxLogin } from './ihx/login.js';
 import { redact } from './redact.js';
 import { createSessionManager } from './sessions/sessionManager.js';
-import { ihxCredentialFromCase } from './integrations/ihxCase.js';
+import { ihxCredentialFromCase, latestRequest, portalCredentialFromCase } from './integrations/ihxCase.js';
+import { portalProfile } from './ihx/casePortal.js';
 import { createRpaClient } from './integrations/rpaClient.js';
 
 const silent = { info() {}, error() {} };
@@ -164,6 +165,12 @@ const otherCase = {
 assert.equal(ihxCredentialFromCase(starCase).username, 'api-user');
 assert.equal(ihxCredentialFromCase(starCase).portalUrl, 'https://provider.ihx.in/');
 assert.equal(ihxCredentialFromCase(otherCase), null);
+assert.equal(portalCredentialFromCase(otherCase).portalUrl, 'https://provider.volohealthtpa.com/home');
+assert.equal(portalProfile('https://epreauth.fhpl.net/SearchPreauths.aspx').id, 'fhpl');
+assert.equal(portalProfile('https://epreauth.fhpl.net/SearchPreauths.aspx').otpFrom, '');
+assert.equal(portalProfile('https://ilhc.icicilombard.com/Home/Login').otpFrom, 'WEBLOGIN@icicilombard.com');
+assert.equal(portalProfile('https://first.godigit.com/').otpFrom, 'noreply@godigit.com');
+assert.equal(portalProfile('https://provider.ihx.in/').otpFrom, 'support@ihx.in');
 const mixedCase = {
   caseData: { payer: 'STAR HEALTH AND ALLIED INSURANCE' },
   hospitalTpaCredentials: [
@@ -183,6 +190,11 @@ const mixedCase = {
 };
 assert.equal(ihxCredentialFromCase(mixedCase).username, 'star-user');
 assert.equal(ihxCredentialFromCase(mixedCase).portalUrl, 'https://provider.ihx.in/login');
+assert.equal(latestRequest([
+  { pmjayRegistrationId: 'old', isTpa: true, createdAt: '2026-10-22T10:00:00.000Z' },
+  { pmjayRegistrationId: 'new', isTpa: true, createdAt: '2026-10-26T07:58:50.000Z' },
+  { pmjayRegistrationId: 'skip', isTpa: false, createdAt: '2026-10-26T09:00:00.000Z' },
+]).pmjayRegistrationId, 'new');
 
 const apiCalls = [];
 const rpa = createRpaClient({

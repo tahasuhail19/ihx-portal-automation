@@ -43,14 +43,8 @@ export function isIhxPortal(identity) {
   return host === 'provider.ihx.in' || name.includes('star health') || name.includes('ihx');
 }
 
-export function ihxCredentialFromCase(payload) {
-  const list = Array.isArray(payload?.hospitalTpaCredentials) ? payload.hospitalTpaCredentials : [];
-  const active = list.filter((entry) => String(entry?.status ?? 'ACTIVE').toUpperCase() === 'ACTIVE');
-  const pool = (active.length ? active : list)
-    .map(identityOf)
-    .filter((identity) => identity.username && identity.password && identity.portalUrl && isIhxPortal(identity));
+function credentialFromPool(payload, pool) {
   if (!pool.length) return null;
-
   const payer = normalize(payload?.caseData?.payer);
   const named = payer
     ? pool.find((identity) => {
@@ -58,10 +52,7 @@ export function ihxCredentialFromCase(payload) {
       return name === payer || name.includes(payer) || payer.includes(name);
     })
     : null;
-  const identity = named
-    || pool.find((item) => hostOf(item.portalUrl) === 'provider.ihx.in')
-    || pool[0];
-
+  const identity = named || pool[0];
   return {
     tpaName: identity.tpaName,
     portalUrl: identity.portalUrl,
@@ -70,28 +61,54 @@ export function ihxCredentialFromCase(payload) {
   };
 }
 
+function portalIdentities(payload) {
+  const list = Array.isArray(payload?.hospitalTpaCredentials) ? payload.hospitalTpaCredentials : [];
+  const active = list.filter((entry) => String(entry?.status ?? 'ACTIVE').toUpperCase() === 'ACTIVE');
+  return (active.length ? active : list)
+    .map(identityOf)
+    .filter((identity) => identity.username && identity.password && identity.portalUrl);
+}
+
+export function portalCredentialFromCase(payload) {
+  return credentialFromPool(payload, portalIdentities(payload));
+}
+
+export function ihxCredentialFromCase(payload) {
+  return credentialFromPool(
+    payload,
+    portalIdentities(payload).filter((identity) => isIhxPortal(identity)),
+  );
+}
+
+export function latestRequest(requests) {
+  const usable = (Array.isArray(requests) ? requests : []).filter((request) => {
+    return request?.isTpa !== false && String(request?.pmjayRegistrationId ?? '').trim();
+  });
+  usable.sort((left, right) => {
+    const leftTime = Date.parse(left?.createdAt || '') || 0;
+    const rightTime = Date.parse(right?.createdAt || '') || 0;
+    return rightTime - leftTime;
+  });
+  return usable[0] || null;
+}
+
 export async function loadIhxCredentials(client, logger = console) {
   const body = await client.fetchRequests();
   const requests = Array.isArray(body?.requests) ? body.requests : [];
-  if (!requests.length) {
+  const request = latestRequest(requests);
+  if (!request) {
     logger.info?.('rpa-requests returned no cases.');
     return null;
   }
 
-  for (const request of requests) {
-    if (request?.isTpa === false) continue;
-    const caseId = String(request?.pmjayRegistrationId ?? '').trim();
-    if (!caseId) continue;
-    const documentType = String(request?.documentType ?? '').trim() || 'ADMISSIONDOCUMENT';
-    const payload = await client.fetchCaseData(caseId, documentType);
-    const credential = ihxCredentialFromCase(payload);
-    if (!credential) {
-      logger.info?.('Skipping a case that is not IHX.');
-      continue;
-    }
-    logger.info?.(`Matched an IHX case for ${credential.tpaName || 'IHX'}.`);
-    return credential;
+  const caseId = String(request.pmjayRegistrationId).trim();
+  const documentType = String(request.documentType ?? '').trim() || 'ADMISSIONDOCUMENT';
+  logger.info?.('Using the latest case.', { caseId });
+  const payload = await client.fetchCaseData(caseId, documentType);
+  const credential = portalCredentialFromCase(payload);
+  if (!credential) {
+    throw new Error('The latest case has no portal login.');
   }
-
-  return null;
+  logger.info?.(`Latest case portal is ${credential.tpaName || 'IHX'}.`);
+  return credential;
 }

@@ -18,7 +18,7 @@ const manager = createSessionManager({
   runLogin: runIhxLogin,
   loadCase: rpaClient ? () => loadIhxCredentials(rpaClient, logger) : null,
   readEmailOtp: emailClient
-    ? (options = {}) => fetchEmailOtp(config.emailOtpFrom, { ...options, client: emailClient, logger })
+    ? (options = {}) => fetchEmailOtp(options.from || config.emailOtpFrom, { ...options, client: emailClient, logger })
     : null,
   logger,
 });

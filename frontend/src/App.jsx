@@ -143,7 +143,7 @@ export default function App() {
         {health?.loginMode === 'portal' ? (
           <p className="banner info" role="status">
             {health.caseApi
-              ? 'Open IHX loads the waiting IHX case, signs in inside the Docker browser, and enters the email OTP when it arrives. You can still type the 5-digit code in the browser.'
+              ? 'Open IHX loads the latest case, opens that portal, signs in with that case login, and enters the email OTP when that portal sends one.'
               : 'Open IHX starts the Docker browser, signs in to the provider portal, then waits for the email OTP. Type the 5-digit code in the browser.'}
             {' '}The same browser stays open so you can finish the admission. This session lasts {Math.round(health.sessionTimeoutMs / 60000)} minutes.
           </p>

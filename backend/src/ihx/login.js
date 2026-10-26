@@ -1,6 +1,6 @@
 import { httpError } from '../redact.js';
+import { portalProfile, runCasePortalLogin } from './casePortal.js';
 
-const LOGIN_WAIT_MS = 30_000;
 const OTP_LENGTH = 5;
 
 const PROVIDER = {
@@ -60,29 +60,15 @@ export async function runIhxLogin({ page, config, onState }) {
     };
   }
 
+  if (!isIhxProvider(config)) {
+    if (!config.portalUrl) {
+      throw httpError(400, 'Portal login is not configured. Add a portal URL.');
+    }
+    return runCasePortalLogin({ page, config, onState });
+  }
+
   assertPortalConfigured(config);
-  if (isIhxProvider(config)) return runProviderLogin({ page, config, onState });
-
-  await onState('LOGGING_IN', 'Opening the configured portal and submitting the login form.');
-  await page.goto(config.portalUrl, { waitUntil: 'domcontentloaded', timeout: 45_000 });
-  await page.locator(config.selectors.username).fill(config.username, { timeout: LOGIN_WAIT_MS });
-  await page.locator(config.selectors.password).fill(config.password, { timeout: LOGIN_WAIT_MS });
-  await page.locator(config.selectors.submit).click({ timeout: LOGIN_WAIT_MS });
-
-  const outcome = await waitForLoginResult(page, config.selectors);
-  if (outcome === 'verification') {
-    return {
-      outcome: 'verification',
-      message: 'The portal is waiting for verification. Enter the code in the browser. This app does not read or bypass it.',
-    };
-  }
-  if (outcome === 'success') {
-    return {
-      outcome: 'ready',
-      message: 'Login succeeded. Automation has stopped. Finish the admission yourself in this browser.',
-    };
-  }
-  throw new Error('Login did not reach the configured success or verification state. Check the selectors. No further workflow was attempted.');
+  return runProviderLogin({ page, config, onState });
 }
 
 async function runProviderLogin({ page, config, onState }) {
@@ -96,7 +82,8 @@ async function runProviderLogin({ page, config, onState }) {
   await onState('LOGGING_IN', 'Signing in. The OTP boxes will appear in this browser.');
   let previousOtp = '';
   if (config.readEmailOtp) {
-    previousOtp = await config.readEmailOtp({ attempts: 1 }).catch(() => '');
+    const from = portalProfile(config.portalUrl).otpFrom || config.emailOtpFrom;
+    previousOtp = await config.readEmailOtp({ attempts: 1, from }).catch(() => '');
   }
   await writeLoginField(page, PROVIDER.username, config.username);
   await page.waitForTimeout(150);
@@ -140,7 +127,8 @@ async function runProviderLogin({ page, config, onState }) {
     if (config.readEmailOtp) {
       await onState('AWAITING_VERIFICATION', 'Reading the email OTP.');
       try {
-        const code = await config.readEmailOtp({ untilDifferentFrom: previousOtp });
+        const from = portalProfile(config.portalUrl).otpFrom || config.emailOtpFrom;
+        const code = await config.readEmailOtp({ untilDifferentFrom: previousOtp, from });
         if (/^\d{5}$/.test(code)) {
           await writeProviderOtp(page, code);
           await page.waitForTimeout(300);
@@ -274,31 +262,4 @@ async function waitForProviderStep(page) {
   }, { timeout: 20_000, polling: 250 }).catch(() => null);
   if (!handle) return { step: 'timeout', notice: '' };
   return handle.jsonValue();
-}
-
-function waitForLoginResult(page, selectors) {
-  return new Promise((resolve) => {
-    let settled = false;
-    const timer = setTimeout(() => finish('timeout'), LOGIN_WAIT_MS + 250);
-    timer.unref?.();
-
-    function finish(value) {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve(value);
-    }
-
-    page
-      .waitForSelector(selectors.success, { timeout: LOGIN_WAIT_MS })
-      .then(() => finish('success'))
-      .catch(() => {});
-
-    if (selectors.verification) {
-      page
-        .waitForSelector(selectors.verification, { timeout: LOGIN_WAIT_MS })
-        .then(() => finish('verification'))
-        .catch(() => {});
-    }
-  });
 }

@@ -137,7 +137,7 @@ export function createSessionManager({ config, desktop, runLogin, loadCase = nul
 
       session.liveUrl = desktop.viewerUrl;
       session.state = 'LOGGING_IN';
-      session.message = 'The browser is open. Signing in to IHX.';
+      session.message = 'The browser is open. Signing in.';
       session.error = null;
       logger.info?.('viewer ready', { sessionId: session.id, state: session.state });
 
