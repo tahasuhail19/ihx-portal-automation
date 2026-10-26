@@ -51,7 +51,7 @@ export function createSessionManager({ config, desktop, runLogin, loadCase = nul
       error: null,
       liveUrl: null,
       createdAt: now,
-      expiresAt: now + config.sessionTimeoutMs,
+      expiresAt: null,
       terminal: false,
       closePromise: null,
       browser: null,
@@ -60,9 +60,6 @@ export function createSessionManager({ config, desktop, runLogin, loadCase = nul
       deadlineTimer: null,
     };
     sessions.set(session.id, session);
-    session.deadlineTimer = setTimeout(() => {
-      void closeSession(session, 'The browser session reached its time limit.', 'CLOSED');
-    }, config.sessionTimeoutMs);
 
     logger.info?.('session created', { sessionId: session.id, state: session.state });
     void run(session);
@@ -165,7 +162,7 @@ export function createSessionManager({ config, desktop, runLogin, loadCase = nul
         setState(
           session,
           'READY_FOR_DOCTOR',
-          'Verification completed. Automation has stopped. Finish the admission yourself in this browser.',
+          'Verification completed. You stay signed in until you log out.',
         );
         return;
       }
@@ -181,14 +178,8 @@ export function createSessionManager({ config, desktop, runLogin, loadCase = nul
 
   async function waitUntilVerified(session) {
     while (!session.terminal && session.state === 'AWAITING_VERIFICATION') {
-      const left = session.expiresAt - Date.now();
-      if (left < 2000) {
-        throw new Error('Verification was not completed before the session expired.');
-      }
       try {
-        await session.page.waitForSelector(config.selectors.success, {
-          timeout: Math.min(left - 1000, 5000),
-        });
+        await session.page.waitForSelector(config.selectors.success, { timeout: 5000 });
         return;
       } catch (error) {
         if (session.terminal) return;
@@ -240,7 +231,7 @@ export function createSessionManager({ config, desktop, runLogin, loadCase = nul
       loginMode: config.loginMode,
       portalUrl: session.portalUrl || null,
       liveUrl: interactive ? session.liveUrl : null,
-      expiresAt: new Date(session.expiresAt).toISOString(),
+      expiresAt: session.expiresAt ? new Date(session.expiresAt).toISOString() : null,
       createdAt: new Date(session.createdAt).toISOString(),
     };
     if (includeToken) view.sessionToken = session.token;

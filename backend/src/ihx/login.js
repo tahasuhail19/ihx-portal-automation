@@ -112,7 +112,7 @@ async function runProviderLogin({ page, config, onState }) {
   if (next.step === 'ready') {
     return {
       outcome: 'ready',
-      message: 'Login succeeded. Automation has stopped. Finish the admission yourself in this browser.',
+      message: 'Login succeeded. You stay signed in until you log out.',
     };
   }
   if (next.step === 'expired') {

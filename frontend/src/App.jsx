@@ -19,7 +19,6 @@ export default function App() {
   const [sessionToken, setSessionToken] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [now, setNow] = useState(Date.now());
   const frameRef = useRef(null);
 
   useEffect(() => {
@@ -52,11 +51,6 @@ export default function App() {
       .catch(() => {
         clearStoredAccess();
       });
-  }, []);
-
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
   }, []);
 
   useEffect(() => {
@@ -145,7 +139,7 @@ export default function App() {
             {health.caseApi
               ? 'Open IHX loads the latest case, opens that portal, signs in with that case login, and enters the email OTP when that portal sends one.'
               : 'Open IHX starts the Docker browser, signs in to the provider portal, then waits for the email OTP. Type the 5-digit code in the browser.'}
-            {' '}The same browser stays open so you can finish the admission. This session lasts {Math.round(health.sessionTimeoutMs / 60000)} minutes.
+            {' '}The browser stays signed in on every portal until you log out.
           </p>
         ) : null}
 
@@ -164,8 +158,7 @@ export default function App() {
           <>
             <div className="status-row" aria-live="polite">
               {session ? <span className={`pill ${session.state}`}>{STATUS_LABELS[session.state] || session.state}</span> : <span className="pill">Idle</span>}
-              {session?.expiresAt && active ? <span className="muted">{formatRemaining(session.expiresAt, now)}</span> : null}
-              {health ? <span className="muted">{Math.round(health.sessionTimeoutMs / 60000)} min session limit</span> : null}
+              {active ? <span className="muted">Stays signed in until you log out</span> : null}
             </div>
             {session?.state === 'STARTING' ? (
               <p className="loading" role="status">
@@ -191,7 +184,6 @@ export default function App() {
                 {session.state === 'LOGGING_IN' ? <span className="spinner" aria-hidden="true" /> : null}
                 {session.portalUrl ? `${session.portalUrl} · ` : ''}
                 {session.message}
-                {session?.expiresAt && active ? ` · ${formatRemaining(session.expiresAt, now)}` : ''}
               </p>
             </div>
             <div className="browser-actions">
@@ -216,15 +208,6 @@ export default function App() {
       ) : null}
     </main>
   );
-}
-
-function formatRemaining(expiresAt, now) {
-  const ms = new Date(expiresAt).getTime() - now;
-  if (ms <= 0) return 'Expired';
-  const total = Math.ceil(ms / 1000);
-  const minutes = Math.floor(total / 60);
-  const seconds = String(total % 60).padStart(2, '0');
-  return `${minutes}:${seconds} left`;
 }
 
 function readStoredAccess() {

@@ -89,13 +89,10 @@ export async function runCasePortalLogin({ page, config, onState }) {
       await enterEmailOtp(page, config, profile, previousOtp, onState);
     }
 
-    if (page.url() !== config.portalUrl) {
-      await page.goto(config.portalUrl, { waitUntil: 'domcontentloaded', timeout: 45_000 }).catch(() => {});
-    }
     const otpNote = profile.otpFrom ? ' The email OTP was entered.' : '';
     return {
       outcome: 'ready',
-      message: `Signed in to ${profile.label}.${otpNote} Continue in this browser.`,
+      message: `Signed in to ${profile.label}.${otpNote} You stay signed in until you log out.`,
     };
   } catch (error) {
     return {
