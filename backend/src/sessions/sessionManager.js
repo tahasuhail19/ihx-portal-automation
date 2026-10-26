@@ -12,7 +12,7 @@ const ACTIVE_STATES = new Set([
 
 const FORGET_AFTER_MS = 10 * 60 * 1000;
 
-export function createSessionManager({ config, desktop, runLogin, logger = console }) {
+export function createSessionManager({ config, desktop, runLogin, loadCase = null, readEmailOtp = null, logger = console }) {
   const sessions = new Map();
 
   function activeCount() {
@@ -32,7 +32,7 @@ export function createSessionManager({ config, desktop, runLogin, logger = conso
   }
 
   function create() {
-    if (config.loginMode === 'portal') {
+    if (config.loginMode === 'portal' && !config.rpaEnabled) {
       assertPortalConfigured(config);
     }
     if (activeCount() >= config.maxActiveSessions) {
@@ -90,7 +90,29 @@ export function createSessionManager({ config, desktop, runLogin, logger = conso
   }
 
   async function run(session) {
+    let loginConfig = config;
     try {
+      if (config.loginMode === 'portal' && config.rpaEnabled) {
+        session.message = 'Checking for an IHX case.';
+        const identity = await loadCase?.();
+        if (session.terminal) return;
+        if (!identity?.username || !identity?.password) {
+          await closeSession(session, 'No IHX case is waiting.', 'FAILED');
+          return;
+        }
+        loginConfig = {
+          ...config,
+          portalUrl: identity.portalUrl || config.portalUrl || 'https://provider.ihx.in/',
+          username: identity.username,
+          password: identity.password,
+          readEmailOtp,
+        };
+      } else {
+        loginConfig = { ...config, readEmailOtp };
+      }
+      session.portalUrl = loginConfig.portalUrl || null;
+      logger.info?.('portal url selected', { sessionId: session.id, portalUrl: session.portalUrl });
+
       const connection = await desktop.connect();
       if (session.terminal) {
         await connection.browser.close().catch(() => {});
@@ -121,7 +143,7 @@ export function createSessionManager({ config, desktop, runLogin, logger = conso
 
       const result = await runLogin({
         page: session.page,
-        config,
+        config: loginConfig,
         onState: async (state, message) => {
           if (session.terminal) return;
           session.state = state;
@@ -152,7 +174,7 @@ export function createSessionManager({ config, desktop, runLogin, logger = conso
     } catch (error) {
       if (!session.terminal) {
         await desktop.closeDesktop?.().catch(() => {});
-        await closeSession(session, friendlyBrowserError(error, config), 'FAILED');
+        await closeSession(session, friendlyBrowserError(error, loginConfig), 'FAILED');
       }
     }
   }
@@ -216,6 +238,7 @@ export function createSessionManager({ config, desktop, runLogin, logger = conso
       message: session.message,
       error: session.error,
       loginMode: config.loginMode,
+      portalUrl: session.portalUrl || null,
       liveUrl: interactive ? session.liveUrl : null,
       expiresAt: new Date(session.expiresAt).toISOString(),
       createdAt: new Date(session.createdAt).toISOString(),

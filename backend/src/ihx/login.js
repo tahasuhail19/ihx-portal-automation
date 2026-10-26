@@ -88,12 +88,16 @@ export async function runIhxLogin({ page, config, onState }) {
 async function runProviderLogin({ page, config, onState }) {
   await page.setViewportSize({ width: 1024, height: 640 }).catch(() => {});
 
-  await onState('LOGGING_IN', 'Opening the IHX portal.');
+  await onState('LOGGING_IN', `Opening ${config.portalUrl}`);
   await page.goto(config.portalUrl, { waitUntil: 'domcontentloaded', timeout: 25_000 });
   await page.locator(PROVIDER.username).waitFor({ state: 'visible', timeout: 20_000 });
   await dismissCookieConsent(page);
 
   await onState('LOGGING_IN', 'Signing in. The OTP boxes will appear in this browser.');
+  let previousOtp = '';
+  if (config.readEmailOtp) {
+    previousOtp = await config.readEmailOtp({ attempts: 1 }).catch(() => '');
+  }
   await writeLoginField(page, PROVIDER.username, config.username);
   await page.waitForTimeout(150);
   await writeLoginField(page, PROVIDER.password, config.password);
@@ -131,10 +135,33 @@ async function runProviderLogin({ page, config, onState }) {
     };
   }
   if (next.step === 'otp') {
+    let message = 'Enter the 5-digit OTP sent to the registered email. Sign-in continues automatically after you type it.';
+    let verifyClicked = false;
+    if (config.readEmailOtp) {
+      await onState('AWAITING_VERIFICATION', 'Reading the email OTP.');
+      try {
+        const code = await config.readEmailOtp({ untilDifferentFrom: previousOtp });
+        if (/^\d{5}$/.test(code)) {
+          await writeProviderOtp(page, code);
+          await page.waitForTimeout(300);
+          try {
+            await clickProviderVerify(page);
+            verifyClicked = true;
+            message = 'The email OTP was entered and Verify was clicked.';
+          } catch {
+            message = 'The email OTP was entered. Click Verify in the browser.';
+          }
+        } else {
+          message = 'No 5-digit email OTP has arrived yet. Type the code in this browser.';
+        }
+      } catch {
+        message = 'The email OTP could not be read. Type the 5-digit code in this browser.';
+      }
+    }
     return {
       outcome: 'verification',
-      message: 'Enter the 5-digit OTP sent to the registered email. Sign-in continues automatically after you type it.',
-      continueAfterOtp: continueProviderOtp,
+      message,
+      continueAfterOtp: verifyClicked ? waitForProviderSignIn : continueProviderOtp,
     };
   }
 
@@ -155,6 +182,34 @@ async function dismissCookieConsent(page) {
   await page.locator('.ant-modal-wrap').waitFor({ state: 'hidden', timeout: 3_000 }).catch(() => {});
 }
 
+async function writeProviderOtp(page, code) {
+  const boxes = page.locator('.otp_login input:visible, .twoFactorOtpContainer input:visible');
+  await boxes.first().waitFor({ state: 'visible', timeout: 8_000 });
+  const count = await boxes.count();
+  for (let index = 0; index < code.length && index < count; index += 1) {
+    const box = boxes.nth(index);
+    await box.click();
+    await page.waitForTimeout(60);
+    await box.evaluate((el, digit) => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+      if (el._valueTracker) el._valueTracker.setValue('');
+      setter.call(el, digit);
+      const propsKey = Object.keys(el).find((key) => key.startsWith('__reactProps$') || key.startsWith('__reactEventHandlers$'));
+      const props = propsKey ? el[propsKey] : null;
+      if (props && typeof props.onChange === 'function') {
+        props.onChange({ target: el, currentTarget: el });
+      }
+    }, code[index]);
+    await page.waitForTimeout(60);
+  }
+}
+
+async function clickProviderVerify(page) {
+  const named = page.locator('.otp_login button, .twoFactorOtpContainer button, button.btn-form-submit').filter({ hasText: /verify/i });
+  const target = (await named.count()) > 0 ? named.first() : page.locator('button.btn-form-submit').first();
+  await target.click({ timeout: 8_000 });
+}
+
 async function writeLoginField(page, selector, value) {
   await page.locator(selector).evaluate((el, next) => {
     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
@@ -168,6 +223,13 @@ async function writeLoginField(page, selector, value) {
     }
     el.dispatchEvent(new Event('input', { bubbles: true }));
   }, value);
+}
+
+async function waitForProviderSignIn(page, isCancelled) {
+  while (!isCancelled()) {
+    if (await isProviderSignedIn(page)) return;
+    await page.waitForTimeout(500);
+  }
 }
 
 export async function continueProviderOtp(page, isCancelled) {

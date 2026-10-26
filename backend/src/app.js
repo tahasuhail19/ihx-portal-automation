@@ -38,6 +38,8 @@ export function createApp(config, manager, logger) {
       loginMode: config.loginMode,
       sessionTimeoutMs: config.sessionTimeoutMs,
       maxActiveSessions: config.maxActiveSessions,
+      caseApi: Boolean(config.rpaEnabled),
+      emailOtp: Boolean(config.emailOtpEnabled),
       apiKeyRequired: Boolean(config.appApiKey),
     });
   });

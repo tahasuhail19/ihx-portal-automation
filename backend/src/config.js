@@ -50,6 +50,11 @@ export function loadConfig() {
     throw new Error('IHX_LOGIN_MODE must be "test" or "portal".');
   }
 
+  const credentialSource = requiredText('IHX_CREDENTIALS', 'env');
+  if (credentialSource !== 'env' && credentialSource !== 'api') {
+    throw new Error('IHX_CREDENTIALS must be "env" or "api".');
+  }
+
   const bindHost = requiredText('HOST', '127.0.0.1');
   const appApiKey = requiredText('APP_API_KEY');
   const localBind = bindHost === '127.0.0.1' || bindHost === 'localhost' || bindHost === '0.0.0.0' || bindHost === '::';
@@ -91,6 +96,14 @@ export function loadConfig() {
     port: integerEnv('PORT', 3001, { min: 1, max: 65535 }),
     maxActiveSessions: integerEnv('MAX_ACTIVE_SESSIONS', 1, { min: 1, max: 5 }),
     staticDir: requiredText('STATIC_DIR'),
+    rpaApiBase: httpUrl('RPA_API_BASE', 'https://apistaging.settlemed.in'),
+    emailOtpApiBase: httpUrl('EMAIL_OTP_API_BASE', 'https://emailautomate.settlemed.ai'),
+    emailOtpFrom: requiredText('EMAIL_OTP_FROM'),
+    credentialSource,
+    rpaEnabled: credentialSource === 'api' && requiredText('RPA_USERNAME') !== '' && requiredText('RPA_PASSWORD') !== '',
+    emailOtpEnabled: requiredText('EMAIL_OTP_EMAIL') !== ''
+      && requiredText('EMAIL_OTP_SECRET') !== ''
+      && requiredText('EMAIL_OTP_FROM') !== '',
   };
 }
 

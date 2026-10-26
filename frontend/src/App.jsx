@@ -60,6 +60,13 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!session) return;
+    console.log('[IHX] state:', session.state);
+    console.log('[IHX] portal URL from the case:', session.portalUrl || '(waiting for the case)');
+    console.log('[IHX] Chrome opens that portal URL. This page only shows the viewer:', session.liveUrl || '(viewer not ready)');
+  }, [session]);
+
+  useEffect(() => {
     if (!session?.id || !sessionToken) return undefined;
     if (session.state === 'FAILED' || session.state === 'CLOSED') return undefined;
     const timer = setInterval(() => {
@@ -135,7 +142,10 @@ export default function App() {
         ) : null}
         {health?.loginMode === 'portal' ? (
           <p className="banner info" role="status">
-            Open IHX starts the Docker browser, signs in to the provider portal, then waits for the email OTP. Type the 5-digit code in the browser. The same browser stays open so you can finish the admission. This session lasts {Math.round(health.sessionTimeoutMs / 60000)} minutes.
+            {health.caseApi
+              ? 'Open IHX loads the waiting IHX case, signs in inside the Docker browser, and enters the email OTP when it arrives. You can still type the 5-digit code in the browser.'
+              : 'Open IHX starts the Docker browser, signs in to the provider portal, then waits for the email OTP. Type the 5-digit code in the browser.'}
+            {' '}The same browser stays open so you can finish the admission. This session lasts {Math.round(health.sessionTimeoutMs / 60000)} minutes.
           </p>
         ) : null}
 
@@ -163,6 +173,7 @@ export default function App() {
                 {session.message}
               </p>
             ) : null}
+            {session?.portalUrl ? <p className="message">Portal URL: {session.portalUrl}</p> : null}
             {session?.message && session.state !== 'STARTING' ? (
               <p className="message">{session.message}</p>
             ) : null}
@@ -178,6 +189,7 @@ export default function App() {
               <span className={`pill ${session.state}`}>{STATUS_LABELS[session.state] || session.state}</span>
               <p>
                 {session.state === 'LOGGING_IN' ? <span className="spinner" aria-hidden="true" /> : null}
+                {session.portalUrl ? `${session.portalUrl} · ` : ''}
                 {session.message}
                 {session?.expiresAt && active ? ` · ${formatRemaining(session.expiresAt, now)}` : ''}
               </p>

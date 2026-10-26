@@ -1,6 +1,6 @@
 # IHX Flow
 
-A doctor clicks **Open IHX**. The backend opens one Chromium window on a Docker virtual desktop, signs in to the IHX provider portal, and shows that same window in the page through noVNC. The doctor types the email OTP in that window. After sign-in, automation stops and the browser stays open for the admission.
+A doctor clicks **Open IHX**. The backend opens one Chromium window on a Docker virtual desktop, signs in to the IHX provider portal, and shows that same window in the page through noVNC. When the case API settings are present, the click loads the waiting IHX case and uses that portal login. When the mailbox settings are present, the email OTP is typed into that same window. Otherwise the doctor types the 5-digit code. After sign-in, automation stops and the browser stays open for the admission.
 
 Browserless is not used. The session limit is `SESSION_TIMEOUT_MS` (30 minutes by default), not the Browserless free-plan limit of 2 minutes.
 
@@ -24,7 +24,7 @@ docker compose down
 
 ## What stays on the server
 
-`IHX_USERNAME`, `IHX_PASSWORD`, and `APP_API_KEY` stay in `.env`. They are not written into the website and are not logged.
+`IHX_USERNAME`, `IHX_PASSWORD`, `RPA_PASSWORD`, `EMAIL_OTP_SECRET`, and `APP_API_KEY` stay in `.env`. They are not written into the website and are not logged. The case and mailbox APIs are the same ones used by the playwright-cli project: `rpa-login`, `rpa-requests`, `tpa-case-data`, and the email OTP service. Set `EMAIL_OTP_FROM` to the sender address on the IHX OTP email before automatic OTP entry can run.
 
 ## Local checks without Docker
 

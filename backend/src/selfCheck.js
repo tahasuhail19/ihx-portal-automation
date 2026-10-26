@@ -5,6 +5,8 @@ import { buildViewerUrl } from './browser/desktop.js';
 import { assertPortalConfigured, runIhxLogin } from './ihx/login.js';
 import { redact } from './redact.js';
 import { createSessionManager } from './sessions/sessionManager.js';
+import { ihxCredentialFromCase } from './integrations/ihxCase.js';
+import { createRpaClient } from './integrations/rpaClient.js';
 
 const silent = { info() {}, error() {} };
 const viewerUrl = 'http://127.0.0.1:6080/vnc.html?autoconnect=1&resize=scale';
@@ -130,6 +132,110 @@ const blocked = createSessionManager({
   logger: silent,
 });
 assert.throws(() => blocked.create(), (error) => error.status === 400);
+
+const apiSecret = 'api-secret-value';
+const apiToken = 'api-token-value';
+const starCase = {
+  caseData: { payer: 'STAR HEALTH AND ALLIED INSURANCE' },
+  hospitalTpaCredentials: [{
+    tpa: 'STAR HEALTH AND ALLIED INSURANCE',
+    userName: 'api-user',
+    password: apiSecret,
+    status: 'ACTIVE',
+    tpamaster: {
+      tpa: 'STAR HEALTH AND ALLIED INSURANCE',
+      platform: 'Portal',
+      urlOrReceiverMail: 'https://provider.ihx.in/',
+    },
+  }],
+};
+const otherCase = {
+  hospitalTpaCredentials: [{
+    tpa: 'VOLO HEALTH INSURANCE TPA PVT LTD',
+    userName: 'other-user',
+    password: apiSecret,
+    status: 'ACTIVE',
+    tpamaster: {
+      platform: 'Portal',
+      urlOrReceiverMail: 'https://provider.volohealthtpa.com/home',
+    },
+  }],
+};
+assert.equal(ihxCredentialFromCase(starCase).username, 'api-user');
+assert.equal(ihxCredentialFromCase(starCase).portalUrl, 'https://provider.ihx.in/');
+assert.equal(ihxCredentialFromCase(otherCase), null);
+const mixedCase = {
+  caseData: { payer: 'STAR HEALTH AND ALLIED INSURANCE' },
+  hospitalTpaCredentials: [
+    otherCase.hospitalTpaCredentials[0],
+    {
+      tpa: 'STAR HEALTH AND ALLIED INSURANCE',
+      userName: 'star-user',
+      password: apiSecret,
+      status: 'ACTIVE',
+      tpamaster: {
+        tpa: 'STAR HEALTH AND ALLIED INSURANCE',
+        platform: 'Portal',
+        urlOrReceiverMail: 'https://provider.ihx.in/login',
+      },
+    },
+  ],
+};
+assert.equal(ihxCredentialFromCase(mixedCase).username, 'star-user');
+assert.equal(ihxCredentialFromCase(mixedCase).portalUrl, 'https://provider.ihx.in/login');
+
+const apiCalls = [];
+const rpa = createRpaClient({
+  env: {
+    RPA_API_BASE: 'https://apistaging.settlemed.in',
+    RPA_USERNAME: 'rpa-user',
+    RPA_PASSWORD: apiSecret,
+  },
+  logger: silent,
+  async fetchImpl(url, init) {
+    const parsed = new URL(url);
+    apiCalls.push(parsed.pathname);
+    if (parsed.pathname === '/rpa-login') {
+      assert.equal(parsed.searchParams.get('password'), apiSecret);
+      return new Response(JSON.stringify({ session: { token: apiToken } }), { status: 200 });
+    }
+    assert.equal(init.headers['rpa-auth-token'], apiToken);
+    if (parsed.pathname === '/rpa-requests') {
+      return new Response(JSON.stringify({ requests: [] }), { status: 200 });
+    }
+    return new Response('{}', { status: 404 });
+  },
+});
+await rpa.login();
+await rpa.fetchRequests();
+assert.deepEqual(apiCalls, ['/rpa-login', '/rpa-requests']);
+
+const waitingCalls = [];
+const waiting = createSessionManager({
+  config: {
+    ...baseConfig(),
+    loginMode: 'portal',
+    rpaEnabled: true,
+    portalUrl: '',
+    username: '',
+    password: '',
+    selectors: {},
+  },
+  desktop: fakeDesktop(waitingCalls),
+  loadCase: async () => null,
+  runLogin: async () => {
+    throw new Error('should not login');
+  },
+  logger: silent,
+});
+const waitingSession = waiting.create();
+const waitingFailed = await waitFor(() => {
+  const view = waiting.get(waitingSession.id, waitingSession.sessionToken);
+  return view.state === 'FAILED' ? view : null;
+});
+assert.match(waitingFailed.error, /No IHX case is waiting/);
+assert.equal(waitingFailed.error.includes(apiSecret), false);
+assert.equal(waitingCalls.includes('connect'), false);
 
 const httpConfig = {
   ...baseConfig(),
