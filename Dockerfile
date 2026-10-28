@@ -28,15 +28,12 @@ WORKDIR /app
 
 COPY package.json package-lock.json ./
 COPY backend/package.json backend/package.json
-COPY frontend/package.json frontend/package.json
 RUN npm ci
 
 COPY . .
-RUN npm run build -w frontend
 
 ENV HOST=0.0.0.0 \
     PORT=3001 \
-    STATIC_DIR=/app/frontend/dist \
     NOVNC_WEB=/opt/noVNC \
     VIEWER_URL=http://127.0.0.1:6080/vnc.html?autoconnect=1&resize=scale&reconnect=1&path=websockify \
     SESSION_TIMEOUT_MS=1800000

@@ -15,11 +15,10 @@ services:
       HOST: "0.0.0.0"
       PORT: "3001"
       DISPLAY: ":99"
-      STATIC_DIR: "/app/frontend/dist"
       NOVNC_WEB: "/opt/noVNC"
       VNC_PORT: "5900"
       NOVNC_PORT: "6080"
-      VIEWER_URL: "https://ended-cork-herald-vocal.trycloudflare.com/vnc.html?autoconnect=1&resize=scale&reconnect=1&path=websockify"
+      VIEWER_URL: "http://127.0.0.1:6080/vnc.html?autoconnect=1&resize=scale&reconnect=1&path=websockify"
       SESSION_TIMEOUT_MS: "1800000"
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/api/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]

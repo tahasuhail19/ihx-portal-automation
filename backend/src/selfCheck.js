@@ -81,6 +81,38 @@ await assert.rejects(
   (error) => error.status === 400,
 );
 
+const otherPortalPage = {
+  visited: '',
+  async goto(url) {
+    this.visited = url;
+  },
+  locator() {
+    throw new Error('non-IHX portal must not fill or click a login form');
+  },
+  getByRole() {
+    throw new Error('non-IHX portal must not fill or click a login form');
+  },
+  route() {
+    throw new Error('non-IHX portal must not change page requests');
+  },
+};
+const otherPortalLogin = await runIhxLogin({
+  page: otherPortalPage,
+  config: {
+    loginMode: 'portal',
+    portalUrl: 'https://provider.volohealthtpa.com/home',
+    username: 'other-user',
+    password: 'other-secret',
+    selectors: {},
+  },
+  onState: async (state) => {
+    assert.equal(state, 'LOGGING_IN');
+  },
+});
+assert.equal(otherPortalLogin.outcome, 'ready');
+assert.equal(otherPortalPage.visited, 'https://provider.volohealthtpa.com/home');
+assert.match(otherPortalLogin.message, /provider\.ihx\.in/);
+
 const calls = [];
 const manager = createSessionManager({
   config: baseConfig(),
@@ -166,10 +198,12 @@ assert.equal(ihxCredentialFromCase(starCase).username, 'api-user');
 assert.equal(ihxCredentialFromCase(starCase).portalUrl, 'https://provider.ihx.in/');
 assert.equal(ihxCredentialFromCase(otherCase), null);
 assert.equal(portalCredentialFromCase(otherCase).portalUrl, 'https://provider.volohealthtpa.com/home');
-assert.equal(portalProfile('https://epreauth.fhpl.net/SearchPreauths.aspx').id, 'fhpl');
-assert.equal(portalProfile('https://epreauth.fhpl.net/SearchPreauths.aspx').otpFrom, '');
-assert.equal(portalProfile('https://ilhc.icicilombard.com/Home/Login').otpFrom, 'WEBLOGIN@icicilombard.com');
-assert.equal(portalProfile('https://first.godigit.com/').otpFrom, 'noreply@godigit.com');
+assert.equal(portalProfile('https://epreauth.fhpl.net/SearchPreauths.aspx').id, 'other');
+assert.equal(portalProfile('https://ilhc.icicilombard.com/Home/Login').id, 'other');
+assert.equal(portalProfile('https://ilhc.icicilombard.com/Home/Login').otpFrom, '');
+assert.equal(portalProfile('https://first.godigit.com/').id, 'other');
+assert.equal(portalProfile('https://provider.volohealthtpa.com/login').id, 'other');
+assert.equal(portalProfile('https://provider.ihx.in/').id, 'ihx');
 assert.equal(portalProfile('https://provider.ihx.in/').otpFrom, 'support@ihx.in');
 const mixedCase = {
   caseData: { payer: 'STAR HEALTH AND ALLIED INSURANCE' },
@@ -265,7 +299,6 @@ const httpConfig = {
   ...baseConfig(),
   appApiKey: 'local-key',
   corsOrigins: ['http://127.0.0.1:5173'],
-  staticDir: '',
 };
 const httpManager = createSessionManager({
   config: httpConfig,
@@ -307,7 +340,7 @@ try {
 
 const routeCalls = [];
 const routeManager = createSessionManager({
-  config: { ...baseConfig(), appApiKey: '', corsOrigins: ['http://127.0.0.1:5173'], staticDir: '' },
+  config: { ...baseConfig(), appApiKey: '', corsOrigins: ['http://127.0.0.1:5173'] },
   desktop: fakeDesktop(routeCalls),
   runLogin: async ({ onState }) => {
     await onState('LOGGING_IN', 'Opening the public test page.');
@@ -370,7 +403,6 @@ function baseConfig() {
     sessionTimeoutMs: 120000,
     maxActiveSessions: 1,
     selectors: { success: '#ready' },
-    staticDir: '',
     appApiKey: '',
     corsOrigins: ['http://127.0.0.1:5173'],
   };

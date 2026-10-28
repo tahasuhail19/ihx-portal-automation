@@ -95,7 +95,6 @@ export function loadConfig() {
     bindHost,
     port: integerEnv('PORT', 3001, { min: 1, max: 65535 }),
     maxActiveSessions: integerEnv('MAX_ACTIVE_SESSIONS', 1, { min: 1, max: 5 }),
-    staticDir: requiredText('STATIC_DIR'),
     rpaApiBase: httpUrl('RPA_API_BASE', 'https://apistaging.settlemed.in'),
     emailOtpApiBase: httpUrl('EMAIL_OTP_API_BASE', 'https://emailautomate.settlemed.ai'),
     emailOtpFrom: requiredText('EMAIL_OTP_FROM'),
